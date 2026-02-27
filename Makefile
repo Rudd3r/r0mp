@@ -20,9 +20,15 @@ ASSETS_SRC_DIR := $(BUILD_DIR)/$(GOARCH)
 
 build: r0mp
 
-r0mp: asset-init
+r0mp: ./bin/r0mp.exe ./bin/r0mp
+
+./bin/r0mp.exe: asset-init
 	@mkdir -p $(BIN_DIR)
-	$(GO) build $(BUILD_FLAGS) $(GOFLAGS) -o $(R0MP_BIN) ./cmd/r0mp/
+	GOOS=windows $(GO) build $(BUILD_FLAGS) $(GOFLAGS) -o ./bin/r0mp.exe ./cmd/r0mp/
+
+./bin/r0mp: asset-init
+	@mkdir -p $(BIN_DIR)
+	GOOS=linux $(GO) build $(BUILD_FLAGS) $(GOFLAGS) -o ./bin/r0mp ./cmd/r0mp/
 
 download-assets: $(ASSETS_ARCHIVE)
 	@if [ ! -d "$(BUILD_DIR)/amd64" ] || [ ! -d "$(BUILD_DIR)/arm64" ]; then \
@@ -59,26 +65,32 @@ clean-all: clean
 	@rm -rfv $(BUILD_DIR)
 
 test: asset-init lint
-	$(GO) test -short -v -skip TestQEMUIntegration ./...
+	$(GO) test -short -skip TestQEMUIntegration ./...
 
 test-long: asset-init lint
-	$(GO) test -v ./...
+	$(GO) test -v -skip TestQEMUIntegration ./...
+
+test-long-quiet: asset-init lint
+	$(GO) test -skip TestQEMUIntegration ./...
+
+test-all: asset-init lint
+	$(GO) test ./...
 
 test-qemu: asset-init
-	$(GO) test -v -run TestQEMUIntegration -short ./pkg/raftinit/
+	$(GO) test -run TestQEMUIntegration -short ./pkg/raftinit/
 
 test-qemu-debug: asset-init
 	DEBUG=1 $(GO) test -v -run TestQEMUIntegration -short ./pkg/raftinit/
 
 test-qemu-long: asset-init
-	$(GO) test -v -run TestQEMUIntegration ./pkg/raftinit/
+	$(GO) test -run TestQEMUIntegration ./pkg/raftinit/
 
 test-qemu-long-debug: asset-init
 	DEBUG=1 $(GO) test -v -run TestQEMUIntegration
 
 verify: clean setup-dev build test
 
-verify-qemu: verify test-qemu
+verify-all: clean setup-dev build test-all
 
 lint:
 	@golangci-lint run

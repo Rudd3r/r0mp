@@ -1106,7 +1106,7 @@ func main() {
 				},
 			},
 		},
-	}).Run()
+	}).Run(os.Args)
 }
 
 func newCove(ctx context.Context, log *slog.Logger, cfg *domain.Config) (*r0mp.Cove, error) {

@@ -78,7 +78,7 @@ func NewDefaultConfig() *Config {
 		CacheDir:               cacheDir,
 		ConfigDir:              configDir,
 		DataDir:                dataDir,
-		LogLevel:               slog.LevelInfo,
+		LogLevel:               slog.LevelWarn,
 		DefaultVolumeSizeBytes: DefaultVolumeSizeBytes,
 		DefaultCpuCount:        DefaultCpuCount,
 		DefaultMemorySize:      DefaultMemorySize,
@@ -127,21 +127,21 @@ func (c *Config) Save() error {
 	if c.ConfigDir == "" {
 		return fmt.Errorf("config directory not set")
 	}
-	
+
 	if err := EnsureDir(c.ConfigDir); err != nil {
 		return fmt.Errorf("failed to ensure config dir: %w", err)
 	}
-	
+
 	cfgPath := filepath.Join(c.ConfigDir, "config.json")
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	
+
 	if err = os.WriteFile(cfgPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -211,18 +211,18 @@ func QemuPath() (string, error) {
 	case "arm64":
 		qemuCommandName = "qemu-system-aarch64"
 	}
-	
+
 	// Add .exe extension for Windows
 	if runtime.GOOS == "windows" {
 		qemuCommandName += ".exe"
 	}
-	
+
 	// Try to find qemu in PATH
 	path, err := exec.LookPath(qemuCommandName)
 	if err == nil {
 		return path, nil
 	}
-	
+
 	// On Windows, check common installation directory if not in PATH
 	if runtime.GOOS == "windows" {
 		programFilesPath := filepath.Join("C:\\Program Files\\qemu", qemuCommandName)
@@ -230,7 +230,7 @@ func QemuPath() (string, error) {
 			return programFilesPath, nil
 		}
 	}
-	
+
 	// Return original error if we couldn't find qemu anywhere
 	return "", err
 }

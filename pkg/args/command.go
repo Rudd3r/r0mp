@@ -32,24 +32,40 @@ type ParentCommand struct {
 	Description      string
 	ShortDescription string
 	SubCommands      []Command
+
+	command Command
 }
 
-func (c *ParentCommand) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config, args []string) error {
+func (c *ParentCommand) SetFlags(flags *flag.FlagSet, args []string) []string {
 	if len(args) > 0 {
 		commandName := strings.ToLower(strings.TrimSpace(args[0]))
 		for _, cmd := range c.SubCommands {
 			for _, name := range cmd.Usage().Names {
 				if name == commandName {
-					return cmd.Call(ctx, log, cfg, args[1:])
+					c.command = cmd
+					return cmd.SetFlags(flags, args[1:])
 				}
 			}
 		}
 	}
-	c.help()
+	return args
+}
+
+func (c *ParentCommand) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config, positionalArgs []string) error {
+	if c.command != nil {
+		return c.command.Call(ctx, log, cfg, positionalArgs)
+	}
+	c.Help(nil)
 	return nil
 }
 
-func (c *ParentCommand) help() {
+func (c *ParentCommand) Help(err error) {
+
+	if c.command != nil {
+		c.command.Help(err)
+		return
+	}
+
 	_, _ = fmt.Fprintf(os.Stderr, "USAGE: %s COMMAND", strings.Join(c.Names, ","))
 	if c.Description != "" {
 		_, _ = fmt.Fprintf(os.Stderr, "\n")
@@ -65,9 +81,22 @@ func (c *ParentCommand) help() {
 		_, _ = fmt.Fprintln(w, strings.Join(usage.Names, ","), "\t", usage.Usage)
 	}
 	_ = w.Flush()
+
+	var verbose bool
+	var debug bool
+	var QemuPath, CacheDir, ConfigDir, DataDir string
+	globalFlags := newGlobalFlags(flag.NewFlagSet("", flag.ContinueOnError), &verbose, &debug, &QemuPath, &CacheDir, &ConfigDir, &DataDir)
+	globalFlags.Usage = func() {}
+
 	_, _ = fmt.Fprintf(os.Stderr, "\n")
 	_, _ = fmt.Fprintf(os.Stderr, "Global Options:\n")
 	_, _ = fmt.Fprintf(os.Stderr, "%s", globalFlags.FlagUsagesWrapped(0))
+
+	if err != nil && !errors.Is(err, flag.ErrHelp) {
+		_, _ = fmt.Fprintf(os.Stderr, "\n")
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "\n")
+	}
 }
 
 func (c *ParentCommand) Usage() Usage {
@@ -86,35 +115,20 @@ type Cmd[V any] struct {
 	Run              func(ctx context.Context, log *slog.Logger, cfg *domain.Config, cmdCfg *V) error
 
 	cmdCfg *V
-	flags  *flag.FlagSet
 	ctx    context.Context
 	log    *slog.Logger
 }
 
-func (c *Cmd[V]) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config, args []string) error {
+func (c *Cmd[V]) SetFlags(flags *flag.FlagSet, args []string) []string {
+	c.cmdCfg = new(V)
+	c.Flags(c.cmdCfg, flags)
+	return args
+}
 
-	c.flags = flag.NewFlagSet("", flag.ContinueOnError)
+func (c *Cmd[V]) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config, positionalArgs []string) error {
+
 	c.log = log
 	c.ctx = ctx
-	c.cmdCfg = new(V)
-	c.Flags(c.cmdCfg, c.flags)
-	c.flags.Init("", flag.ContinueOnError)
-	c.flags.Usage = func() {}
-	if err := c.flags.Parse(args); err != nil {
-		c.help(err)
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	var positionalArgs []string
-	if len(args) > 0 {
-		i := slices.Index(args, c.flags.Arg(0))
-		if i >= 0 {
-			positionalArgs = args[i:]
-		}
-	}
 
 	var err error
 	for _, arg := range c.PositionalArgs {
@@ -129,14 +143,14 @@ func (c *Cmd[V]) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config,
 		err = fmt.Errorf("command takes no additional positional arguments")
 	}
 	if err != nil {
-		c.help(err)
+		c.Help(err)
 		return err
 	}
 	if len(positionalArgs) > 0 && slices.ContainsFunc(c.PositionalArgs, func(p *PositionalArg[V]) bool {
 		return p.Required
 	}) {
 		err = fmt.Errorf("missing required positional arguments")
-		c.help(err)
+		c.Help(err)
 		return err
 	}
 
@@ -148,9 +162,12 @@ func (c *Cmd[V]) Call(ctx context.Context, log *slog.Logger, cfg *domain.Config,
 	return c.Run(c.ctx, c.log, cfg, c.cmdCfg)
 }
 
-func (c *Cmd[V]) help(err error) {
+func (c *Cmd[V]) Help(err error) {
 	_, _ = fmt.Fprintf(os.Stderr, "USAGE: %s", strings.Join(c.Names, ","))
-	if c.flags.HasFlags() {
+	flags := flag.NewFlagSet("", flag.ContinueOnError)
+	flags.Usage = func() {}
+	c.SetFlags(flags, []string{})
+	if flags.HasFlags() {
 		_, _ = fmt.Fprintf(os.Stderr, " [OPTIONS]")
 	}
 	if len(c.PositionalArgs) > 0 {
@@ -192,11 +209,18 @@ func (c *Cmd[V]) help(err error) {
 		_, _ = fmt.Fprintf(os.Stderr, "\n")
 	}
 
-	if c.flags.HasFlags() {
+	if flags.HasFlags() {
 		_, _ = fmt.Fprintf(os.Stderr, "Options:\n")
-		_, _ = fmt.Fprintf(os.Stderr, "%s", c.flags.FlagUsagesWrapped(0))
+		_, _ = fmt.Fprintf(os.Stderr, "%s", flags.FlagUsagesWrapped(0))
 		_, _ = fmt.Fprintf(os.Stderr, "\n")
 	}
+
+	var verbose bool
+	var debug bool
+	var QemuPath, CacheDir, ConfigDir, DataDir string
+	globalFlags := newGlobalFlags(flag.NewFlagSet("", flag.ContinueOnError), &verbose, &debug, &QemuPath, &CacheDir, &ConfigDir, &DataDir)
+	globalFlags.Usage = func() {}
+
 	_, _ = fmt.Fprintf(os.Stderr, "Global Options:\n")
 	_, _ = fmt.Fprintf(os.Stderr, "%s", globalFlags.FlagUsagesWrapped(0))
 

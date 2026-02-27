@@ -18,3 +18,4 @@ pkg/assets/e2fsck
 pkg/assets/mke2fs
 pkg/assets/initrd.gz
 pkg/assets/vmlinuz
+/r0mp
